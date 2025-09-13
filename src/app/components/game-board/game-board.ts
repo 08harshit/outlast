@@ -1,6 +1,8 @@
 import { Component, OnInit, OnDestroy, ElementRef, ViewChild } from '@angular/core';
+import { Subscription, interval } from 'rxjs';
 import Phaser from 'phaser';
 import * as _ from 'lodash';
+import { PlayerState, ObstacleState } from '../../services/game-state.service';
 
 @Component({
   selector: 'app-game-board',
@@ -9,21 +11,34 @@ import * as _ from 'lodash';
   styleUrl: './game-board.scss'
 })
 export class GameBoardComponent implements OnInit, OnDestroy {
+  private static instanceCounter = 0;
+  private instanceId: number = 0;
+  // ...existing code...
   @ViewChild('gameContainer', { static: true }) gameContainer!: ElementRef;
   
   private game!: Phaser.Game;
   private player!: Phaser.Physics.Arcade.Sprite;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: any;
+  private bullets!: Phaser.Physics.Arcade.Group;
+  private obstacles!: Phaser.Physics.Arcade.StaticGroup;
+  private lastFired = 0;
+  private playerHealth = 100;
+  private healthText!: Phaser.GameObjects.Text;
+  constructor() {
+  // ...existing code...
+  }
 
   ngOnInit(): void {
     this.initializeGame();
+    // ...existing code...
   }
 
   ngOnDestroy(): void {
     if (this.game) {
       this.game.destroy(true);
     }
+    // ...existing code...
   }
 
   private initializeGame(): void {
@@ -70,6 +85,20 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     obstacleGraphics.fillRect(0, 0, 64, 64);
     obstacleGraphics.generateTexture('obstacle', 64, 64);
     obstacleGraphics.destroy();
+
+    // Create a small yellow bullet
+    const bulletGraphics = this.game.scene.scenes[0].add.graphics();
+    bulletGraphics.fillStyle(0xffff00);
+    bulletGraphics.fillRect(0, 0, 8, 8);
+    bulletGraphics.generateTexture('bullet', 8, 8);
+    bulletGraphics.destroy();
+
+    // Create explosion effect texture
+    const explosionGraphics = this.game.scene.scenes[0].add.graphics();
+    explosionGraphics.fillStyle(0xff4500); // Orange-red color
+    explosionGraphics.fillCircle(0, 0, 16);
+    explosionGraphics.generateTexture('explosion', 32, 32);
+    explosionGraphics.destroy();
   }
 
   private create(): void {
@@ -91,6 +120,21 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     // Add player sprite to the center of the world
     this.player = scene.physics.add.sprite(worldWidth / 2, worldHeight / 2, 'player');
     this.player.setCollideWorldBounds(true);
+    
+    // Set player data for multiplayer preparation
+    this.player.setData('health', this.playerHealth);
+    this.player.setData('playerId', 'player1'); // For future multiplayer
+    
+
+
+    // Create bullets group
+    this.bullets = scene.physics.add.group({
+      defaultKey: 'bullet',
+      maxSize: 50
+    });
+
+    // Create obstacles static group
+    this.obstacles = scene.physics.add.staticGroup();
 
     // Create some obstacles scattered around the world
     this.createObstacles(scene, worldWidth, worldHeight);
@@ -104,14 +148,21 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     this.cursors = scene.input.keyboard!.createCursorKeys();
     this.wasd = scene.input.keyboard!.addKeys('W,S,A,D');
 
+    // Set up mouse input for shooting
+    scene.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.leftButtonDown()) {
+        this.fireBullet(scene);
+      }
+    });
+
     // Add UI text that follows the camera
-    const uiText = scene.add.text(16, 16, 'WASD/Arrow Keys: Move\nMouse: Look direction\nGTA Vice City style controls!', {
+    this.healthText = scene.add.text(16, 16, 'WASD/Arrow Keys: Move\nMouse: Look direction\nLeft Click: Fire bullet\nHealth: ' + this.playerHealth, {
       fontSize: '16px',
       color: '#ffffff',
       backgroundColor: '#000000',
       padding: { x: 10, y: 5 }
     });
-    uiText.setScrollFactor(0); // Keep UI text fixed on screen
+    this.healthText.setScrollFactor(0); // Keep UI text fixed on screen
   }
 
   private createGridPattern(scene: any, worldWidth: number, worldHeight: number): void {
@@ -143,21 +194,215 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     // Use Lodash range to create array of obstacle indices
     const obstacleIndices = _.range(obstacleCount);
     
+    // Prepare obstacles data for game state
+    const obstaclesData: Omit<ObstacleState, 'id'>[] = [];
+    
     // Use Lodash forEach for cleaner iteration
     _.forEach(obstacleIndices, (index) => {
       // Use Lodash random for better random number generation
       const x = _.random(100, worldWidth - 100);
       const y = _.random(100, worldHeight - 100);
       
-      const obstacle = scene.physics.add.sprite(x, y, 'obstacle');
-      obstacle.setImmovable(true);
+      // Create obstacle directly in static group
+      this.obstacles.create(x, y, 'obstacle');
       
-      // Add collision between player and obstacles
-      scene.physics.add.collider(this.player, obstacle);
+      // Add to obstacles data for game state
+      obstaclesData.push({
+        x: x,
+        y: y,
+        width: 64,
+        height: 64
+      });
+    });
+    
+ 
+    // Add collision between player and obstacles group
+    scene.physics.add.collider(this.player, this.obstacles);
+    
+    // Add collision between bullets and obstacles group
+    scene.physics.add.collider(this.bullets, this.obstacles, (bullet: Phaser.Physics.Arcade.Sprite, obstacle: Phaser.Physics.Arcade.Sprite) => {
+      // Create explosion effect at bullet position
+      this.createExplosionEffect(scene, bullet.x, bullet.y);
+      
+      // Remove bullet from game state
+      const bulletId = bullet.getData('bulletId') || `bullet_${bullet.x}_${bullet.y}`;
+      
+      
+      // Destroy the bullet
+      bullet.destroy();
+      
+      // Static obstacles cannot move - no need for extra safety measures
+    });
+    
+    // Add collision between bullets and player (for multiplayer preparation)
+    scene.physics.add.collider(this.bullets, this.player, (bullet: Phaser.Physics.Arcade.Sprite, player: Phaser.Physics.Arcade.Sprite) => {
+      this.handlePlayerHit(scene, bullet, player);
     });
     
     // Log obstacle count using Lodash
-    console.log(`Created ${_.size(obstacleIndices)} obstacles using Lodash!`);
+  // ...existing code...
+  }
+
+  private fireBullet(scene: any): void {
+    const time = scene.time.now;
+    
+    // Rate limiting - can only fire every 200ms
+    if (time - this.lastFired < 200) {
+      return;
+    }
+    
+    this.lastFired = time;
+    
+    // Get bullet from pool or create new one
+    const bullet = this.bullets.get();
+    
+    if (bullet) {
+      // Position bullet at player center
+      bullet.setPosition(this.player.x, this.player.y);
+      
+      // Get mouse position
+      const mouseX = scene.input.activePointer.worldX;
+      const mouseY = scene.input.activePointer.worldY;
+      
+      // Calculate direction to mouse
+      const angle = Phaser.Math.Angle.Between(
+        this.player.x, 
+        this.player.y, 
+        mouseX, 
+        mouseY
+      );
+      
+      // Set bullet rotation and velocity
+      bullet.setRotation(angle);
+      const bulletSpeed = 400;
+      const velocityX = Math.cos(angle) * bulletSpeed;
+      const velocityY = Math.sin(angle) * bulletSpeed;
+      bullet.setVelocity(velocityX, velocityY);
+      
+      // Set bullet owner for multiplayer preparation
+      bullet.setData('ownerId', this.player.getData('playerId'));
+      
+
+      // Set bullet to be destroyed after 3 seconds with explosion effect
+      scene.time.delayedCall(3000, () => {
+        if (bullet.active) {
+          this.createExplosionEffect(scene, bullet.x, bullet.y);
+          bullet.destroy();
+        }
+      });
+    }
+  }
+
+  private createExplosionEffect(scene: any, x: number, y: number): void {
+    // Create explosion sprite
+    const explosion = scene.add.sprite(x, y, 'explosion');
+    explosion.setScale(0.5);
+    explosion.setAlpha(0.8);
+    
+    // Animate explosion
+    scene.tweens.add({
+      targets: explosion,
+      scaleX: 2,
+      scaleY: 2,
+      alpha: 0,
+      duration: 300,
+      ease: 'Power2',
+      onComplete: () => {
+        explosion.destroy();
+      }
+    });
+    
+    // Create particle effect using graphics
+    const particles = scene.add.graphics();
+    particles.setPosition(x, y);
+    
+    // Create multiple small particles
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const distance = _.random(20, 40);
+      const particleX = Math.cos(angle) * distance;
+      const particleY = Math.sin(angle) * distance;
+      
+      // Create particle
+      const particle = scene.add.graphics();
+      particle.fillStyle(_.sample([0xff4500, 0xff6347, 0xffa500, 0xffff00])); // Random colors
+      particle.fillCircle(0, 0, _.random(2, 4));
+      particle.setPosition(x + particleX, y + particleY);
+      
+      // Animate particle
+      scene.tweens.add({
+        targets: particle,
+        x: x + particleX * 2,
+        y: y + particleY * 2,
+        alpha: 0,
+        scaleX: 0,
+        scaleY: 0,
+        duration: _.random(200, 400),
+        ease: 'Power2',
+        onComplete: () => {
+          particle.destroy();
+        }
+      });
+    }
+    
+    // Destroy particles container after animation
+    scene.time.delayedCall(500, () => {
+      particles.destroy();
+    });
+  }
+
+  private handlePlayerHit(scene: any, bullet: Phaser.Physics.Arcade.Sprite, player: Phaser.Physics.Arcade.Sprite): void {
+    // Don't hit yourself (for future multiplayer)
+    if (bullet.getData('ownerId') === player.getData('playerId')) {
+      return;
+    }
+
+    // Create hit effect
+    this.createExplosionEffect(scene, bullet.x, bullet.y);
+    
+    // Reduce player health
+    const currentHealth = player.getData('health');
+    const newHealth = Math.max(0, currentHealth - 25); // 25 damage per hit
+    player.setData('health', newHealth);
+    this.playerHealth = newHealth;
+    
+    // Update health display
+    this.updateHealthDisplay(scene);
+    
+    // Flash player red when hit
+    scene.tweens.add({
+      targets: player,
+      tint: 0xff0000,
+      duration: 100,
+      yoyo: true,
+      repeat: 2,
+      onComplete: () => {
+        player.clearTint();
+      }
+    });
+    
+    // Destroy bullet
+    bullet.destroy();
+  }
+
+  private updateHealthDisplay(scene: any): void {
+    if (this.healthText) {
+      this.healthText.setText('WASD/Arrow Keys: Move\nMouse: Look direction\nLeft Click: Fire bullet\nHealth: ' + this.playerHealth);
+    }
+  }
+
+  private updatePlayerState(): void {
+    const playerState: PlayerState = {
+      id: this.player.getData('playerId'),
+      x: this.player.x,
+      y: this.player.y,
+      rotation: this.player.rotation,
+      health: this.playerHealth,
+      isAlive: this.playerHealth > 0,
+      velocityX: this.player.body?.velocity.x || 0,
+      velocityY: this.player.body?.velocity.y || 0
+    };
+    
   }
 
   private update(): void {
@@ -213,5 +458,8 @@ export class GameBoardComponent implements OnInit, OnDestroy {
       // Optional: Idle state
       this.player.setAlpha(0.8);
     }
+    
+    // Update player state in game state service
+    this.updatePlayerState();
   }
 }
