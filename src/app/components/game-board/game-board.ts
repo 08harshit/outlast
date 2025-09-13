@@ -50,10 +50,17 @@ export class GameBoardComponent implements OnInit, OnDestroy {
   }
 
   private preload(): void {
-    // Create a 32x32 blue square for the player
+    // Create a 32x32 blue square for the player with red border on front
     const graphics = this.game.scene.scenes[0].add.graphics();
+    
+    // Fill blue square
     graphics.fillStyle(0x0066ff);
     graphics.fillRect(0, 0, 32, 32);
+    
+    // Add red border on the right side (front face)
+    graphics.fillStyle(0xff0000);
+    graphics.fillRect(28, 0, 4, 32); // Red border on right edge
+    
     graphics.generateTexture('player', 32, 32);
     graphics.destroy();
 
