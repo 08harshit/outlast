@@ -3,9 +3,7 @@ name: Basic CI with Logging
 # Trigger on push to main branch and pull requests
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main ]
+    branches: [ master, '*' ]
 
 jobs:
   basic-checks:
