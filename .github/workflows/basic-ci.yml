@@ -1,0 +1,93 @@
+name: Basic CI with Logging
+
+# Trigger on push to main branch and pull requests
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  basic-checks:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Checkout the code
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for better logging
+      
+      # Step 2: Setup Node.js
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      # Step 3: Log environment info
+      - name: 📊 Log environment info
+        run: |
+          echo "=== Environment Information ==="
+          echo "Node.js version: $(node --version)"
+          echo "NPM version: $(npm --version)"
+          echo "OS: $(uname -a)"
+          echo "Working directory: $(pwd)"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "================================"
+      
+      # Step 4: Install dependencies with logging
+      - name: 📦 Install dependencies
+        run: |
+          echo "Installing dependencies..."
+          npm ci
+          echo "Dependencies installed successfully!"
+          echo "Package count: $(npm list --depth=0 | wc -l)"
+      
+      # Step 5: Log project structure
+      - name: 📁 Log project structure
+        run: |
+          echo "=== Project Structure ==="
+          echo "Root directory contents:"
+          ls -la
+          echo ""
+          echo "Source directory contents:"
+          ls -la src/ || echo "No src directory found"
+          echo ""
+          echo "Package.json scripts:"
+          npm run
+          echo "========================"
+      
+      # Step 6: Basic build check
+      - name: 🔨 Build project
+        run: |
+          echo "Building Angular project..."
+          npm run build
+          echo "Build completed successfully!"
+          echo "Build output size:"
+          du -sh dist/ || echo "No dist directory found"
+      
+      # Step 7: Log build artifacts
+      - name: 📋 Log build artifacts
+        run: |
+          echo "=== Build Artifacts ==="
+          if [ -d "dist" ]; then
+            echo "Dist directory contents:"
+            find dist/ -type f -name "*.js" -o -name "*.css" -o -name "*.html" | head -10
+            echo "Total files in dist: $(find dist/ -type f | wc -l)"
+          else
+            echo "No dist directory found"
+          fi
+          echo "======================="
+      
+      # Step 8: Final success message
+      - name: ✅ Success
+        run: |
+          echo "🎉 All basic checks passed!"
+          echo "✅ Code checkout: OK"
+          echo "✅ Node.js setup: OK"
+          echo "✅ Dependencies: OK"
+          echo "✅ Build: OK"
+          echo "🚀 Ready for more advanced CI/CD!"
