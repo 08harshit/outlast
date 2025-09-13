@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, ElementRef, ViewChild } from '@angular/co
 import { Subscription, interval } from 'rxjs';
 import Phaser from 'phaser';
 import * as _ from 'lodash';
-import { PlayerState, ObstacleState } from '../../services/game-state.service';
+import { PlayerState, ObstacleState } from 'outlast-shared';
 
 @Component({
   selector: 'app-game-board',

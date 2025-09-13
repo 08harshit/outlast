@@ -16,7 +16,7 @@
     "module": "preserve",
     "baseUrl": "./",
     "paths": {
-      "outlast-shared": ["../outlastCommons/index.ts"]
+      "outlast-shared": ["../outlast-shared/index.ts"]
     }
   },
   "angularCompilerOptions": {
